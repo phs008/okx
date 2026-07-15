@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "okx-signal-scanner"
+version = "1.0.0"
+description = "OKX USDT perpetual swap 15m RSI scanner with Discord alerts"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+okx-scanner = "okx_scanner.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["okx_scanner*"]
