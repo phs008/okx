@@ -17,7 +17,9 @@ DEFAULT_BAR = "15m"
 DEFAULT_RSI_PERIOD = 14
 DEFAULT_RSI_OVERSOLD = 30.0
 DEFAULT_RSI_OVERBOUGHT = 70.0
-DEFAULT_CANDLE_LIMIT = 100
+DEFAULT_CANDLE_LIMIT = 2400
+DEFAULT_VWMA_PERIOD = 100
+DEFAULT_DB_PATH = "okx_scanner.sqlite3"
 DEFAULT_SCAN_INTERVAL_SECONDS = 900
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 DEFAULT_REQUEST_ATTEMPTS = 3
@@ -32,6 +34,8 @@ class Settings:
     rsi_oversold: float = DEFAULT_RSI_OVERSOLD
     rsi_overbought: float = DEFAULT_RSI_OVERBOUGHT
     candle_limit: int = DEFAULT_CANDLE_LIMIT
+    vwma_period: int = DEFAULT_VWMA_PERIOD
+    db_path: str = DEFAULT_DB_PATH
     scan_interval_seconds: int = DEFAULT_SCAN_INTERVAL_SECONDS
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
     request_attempts: int = DEFAULT_REQUEST_ATTEMPTS
@@ -48,6 +52,8 @@ class Settings:
             rsi_oversold=_float(values, "RSI_OVERSOLD", DEFAULT_RSI_OVERSOLD),
             rsi_overbought=_float(values, "RSI_OVERBOUGHT", DEFAULT_RSI_OVERBOUGHT),
             candle_limit=_int(values, "CANDLE_LIMIT", DEFAULT_CANDLE_LIMIT),
+            vwma_period=_int(values, "VWMA_PERIOD", DEFAULT_VWMA_PERIOD),
+            db_path=values.get("DB_PATH", DEFAULT_DB_PATH),
             scan_interval_seconds=_int(values, "SCAN_INTERVAL_SECONDS", DEFAULT_SCAN_INTERVAL_SECONDS),
             request_timeout_seconds=_float(values, "REQUEST_TIMEOUT_SECONDS", DEFAULT_REQUEST_TIMEOUT_SECONDS),
             request_attempts=_int(values, "REQUEST_ATTEMPTS", DEFAULT_REQUEST_ATTEMPTS),
@@ -68,8 +74,13 @@ class Settings:
             raise ConfigError("RSI_PERIOD must be positive")
         if not 0 <= self.rsi_oversold < self.rsi_overbought <= 100:
             raise ConfigError("RSI thresholds must satisfy 0 <= oversold < overbought <= 100")
-        if self.candle_limit < self.rsi_period + 1 or self.candle_limit > 300:
-            raise ConfigError("CANDLE_LIMIT must cover RSI history and be <= 300")
+        if self.vwma_period <= 0:
+            raise ConfigError("VWMA_PERIOD must be positive")
+        minimum_candles = max(self.rsi_period + 1, self.vwma_period + 1)
+        if self.candle_limit < minimum_candles:
+            raise ConfigError("CANDLE_LIMIT must cover RSI and VWMA history")
+        if not self.db_path:
+            raise ConfigError("DB_PATH cannot be empty")
         if self.scan_interval_seconds <= 0:
             raise ConfigError("SCAN_INTERVAL_SECONDS must be positive")
         if self.request_timeout_seconds <= 0 or self.request_attempts <= 0:

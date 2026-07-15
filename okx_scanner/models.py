@@ -22,7 +22,11 @@ def _decimal(value: object, field: str) -> Decimal:
 @dataclass(frozen=True, slots=True)
 class Candle:
     ts: int
+    open: Decimal
+    high: Decimal
+    low: Decimal
     close: Decimal
+    volume: Decimal
     confirmed: bool
 
     @classmethod
@@ -33,11 +37,23 @@ class Candle:
             ts = int(str(row[0]))
         except ValueError as exc:
             raise DataError("invalid candle timestamp") from exc
+        open_price = _decimal(row[1], "open")
+        high = _decimal(row[2], "high")
+        low = _decimal(row[3], "low")
         close = _decimal(row[4], "close")
+        volume = _decimal(row[5], "volume")
         confirmed = str(row[8]) == "1"
-        if ts < 0 or close < 0:
+        if ts < 0 or min(open_price, high, low, close, volume) < 0:
             raise DataError("invalid candle values")
-        return cls(ts=ts, close=close, confirmed=confirmed)
+        return cls(
+            ts=ts,
+            open=open_price,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            confirmed=confirmed,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +91,9 @@ class RsiHit:
     candle_ts: int
     rsi: float
     volume_24h: Decimal
+    close: Decimal
+    vwma_100: Decimal
+    vwma_signal: str
 
     @property
     def state(self) -> str:
@@ -86,5 +105,8 @@ class RsiHit:
             "candleTs": self.candle_ts,
             "rsi": round(self.rsi, 4),
             "volume24h": str(self.volume_24h),
+            "close": str(self.close),
+            "vwma100": str(self.vwma_100),
+            "vwmaSignal": self.vwma_signal,
             "state": self.state,
         }

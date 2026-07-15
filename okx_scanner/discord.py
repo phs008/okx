@@ -79,7 +79,8 @@ def _hit_line(hit: RsiHit) -> str:
     threshold = "30 이하" if hit.rsi <= 30 else "70 이상"
     return (
         f"{hit.instrument_id}: RSI {hit.rsi:.2f} ({threshold}), "
-        f"24h volume {format_volume(hit.volume_24h)}"
+        f"24h volume {format_volume(hit.volume_24h)}, "
+        f"close {format_volume(hit.close)}, VWMA100 {format_volume(hit.vwma_100)} ({hit.vwma_signal})"
     )
 
 

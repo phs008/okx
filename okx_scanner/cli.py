@@ -7,10 +7,12 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from . import __version__
+from .cached_market import CachedMarketClient
 from .config import ConfigError, Settings
 from .discord import DiscordWebhook
 from .okx_client import OkxClient
 from .service import ScannerService
+from .sqlite_store import SqliteCandleStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,11 +41,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print({"ok": False, "error": str(exc)}, stream=sys.stderr)
         return 2
 
-    market = OkxClient(
+    upstream_market = OkxClient(
         settings.okx_base_url,
         timeout_seconds=settings.request_timeout_seconds,
         attempts=settings.request_attempts,
     )
+    market = CachedMarketClient(upstream_market, SqliteCandleStore(settings.db_path))
     notifier = (
         DiscordWebhook(settings.discord_webhook_url, timeout_seconds=settings.request_timeout_seconds)
         if settings.discord_webhook_url

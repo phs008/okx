@@ -17,6 +17,9 @@ class OkxError(RuntimeError):
 
 
 class OkxClient:
+    max_candle_page_size = 300
+    max_history_candle_page_size = 100
+
     def __init__(
         self,
         base_url: str,
@@ -47,20 +50,61 @@ class OkxClient:
         return sorted(instruments, key=lambda item: item.instrument_id)
 
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]:
-        data = self._get(
-            "/api/v5/market/candles",
-            {"instId": instrument_id, "bar": bar, "limit": str(limit)},
-        )
         candles: dict[int, Candle] = {}
-        for row in data:
-            if not isinstance(row, list):
-                continue
-            try:
-                candle = Candle.from_okx_row(row)
-            except DataError:
-                continue
-            candles[candle.ts] = candle
+        self._collect_candle_pages(
+            "/api/v5/market/candles",
+            instrument_id,
+            bar,
+            limit,
+            self.max_candle_page_size,
+            candles,
+            cursor=None,
+        )
+        if len(candles) < limit:
+            self._collect_candle_pages(
+                "/api/v5/market/history-candles",
+                instrument_id,
+                bar,
+                limit,
+                self.max_history_candle_page_size,
+                candles,
+                cursor=min(candles) if candles else None,
+            )
         return [candles[ts] for ts in sorted(candles)]
+
+    def _collect_candle_pages(
+        self,
+        path: str,
+        instrument_id: str,
+        bar: str,
+        limit: int,
+        max_page_size: int,
+        candles: dict[int, Candle],
+        *,
+        cursor: int | None,
+    ) -> None:
+        while len(candles) < limit:
+            remaining = limit - len(candles)
+            page_limit = min(max_page_size, remaining + (1 if cursor is not None else 0))
+            params = {"instId": instrument_id, "bar": bar, "limit": str(page_limit)}
+            if cursor is not None:
+                params["after"] = str(cursor)
+            data = self._get(path, params)
+            if not data:
+                break
+
+            before_count = len(candles)
+            for row in data:
+                if not isinstance(row, list):
+                    continue
+                try:
+                    candle = Candle.from_okx_row(row)
+                except DataError:
+                    continue
+                candles[candle.ts] = candle
+            if len(candles) == before_count:
+                break
+            cursor = min(candles)
 
     def get_24h_volume(self, instrument_id: str) -> Decimal:
         data = self._get("/api/v5/market/ticker", {"instId": instrument_id})

@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from .config import Settings
-from .indicators import wilder_rsi
+from .indicators import vwma, wilder_rsi
 from .models import Candle, Instrument, RsiHit
 
 
@@ -117,20 +117,38 @@ class ScannerService:
             self.settings.candle_limit,
         )
         completed = [candle for candle in candles if candle.confirmed]
-        if len(completed) < self.settings.rsi_period + 1:
+        minimum_candles = max(self.settings.rsi_period + 1, self.settings.vwma_period + 1)
+        if len(completed) < minimum_candles:
             return None
         latest = completed[-1]
         rsi = wilder_rsi([candle.close for candle in completed], self.settings.rsi_period)
-        if rsi <= self.settings.rsi_oversold or rsi >= self.settings.rsi_overbought:
+        closes = [candle.close for candle in completed]
+        volumes = [candle.volume for candle in completed]
+        latest_vwma = vwma(closes, volumes, self.settings.vwma_period)
+        previous_vwma = vwma(closes[:-1], volumes[:-1], self.settings.vwma_period)
+        is_oversold_below_vwma = rsi <= self.settings.rsi_oversold and latest.close < latest_vwma
+        is_overbought_above_vwma = rsi >= self.settings.rsi_overbought and latest.close > latest_vwma
+        if is_oversold_below_vwma or is_overbought_above_vwma:
             volume_24h = self.market.get_24h_volume(instrument_id)
             return RsiHit(
                 instrument_id=instrument_id,
                 candle_ts=latest.ts,
                 rsi=rsi,
                 volume_24h=volume_24h,
+                close=latest.close,
+                vwma_100=latest_vwma,
+                vwma_signal=_vwma_signal(completed[-2].close, previous_vwma, latest.close, latest_vwma),
             )
         return None
 
     def _log(self, message: str) -> None:
         if self._logger is not None:
             self._logger(message)
+
+
+def _vwma_signal(previous_close: Decimal, previous_vwma: Decimal, latest_close: Decimal, latest_vwma: Decimal) -> str:
+    if previous_close <= previous_vwma and latest_close > latest_vwma:
+        return "CROSS_ABOVE"
+    if previous_close >= previous_vwma and latest_close < latest_vwma:
+        return "CROSS_BELOW"
+    return "ABOVE" if latest_close > latest_vwma else "BELOW" if latest_close < latest_vwma else "TOUCH"
