@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Protocol
 
 from .config import Settings
@@ -14,6 +15,7 @@ from .models import Candle, Instrument, RsiHit
 class MarketClient(Protocol):
     def get_perp_instruments(self, quote_currency: str) -> list[Instrument]: ...
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]: ...
+    def get_24h_volume(self, instrument_id: str) -> Decimal: ...
 
 
 class Notifier(Protocol):
@@ -120,7 +122,13 @@ class ScannerService:
         latest = completed[-1]
         rsi = wilder_rsi([candle.close for candle in completed], self.settings.rsi_period)
         if rsi <= self.settings.rsi_oversold or rsi >= self.settings.rsi_overbought:
-            return RsiHit(instrument_id=instrument_id, candle_ts=latest.ts, rsi=rsi)
+            volume_24h = self.market.get_24h_volume(instrument_id)
+            return RsiHit(
+                instrument_id=instrument_id,
+                candle_ts=latest.ts,
+                rsi=rsi,
+                volume_24h=volume_24h,
+            )
         return None
 
     def _log(self, message: str) -> None:

@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .models import Candle, DataError, Instrument
+from .models import Candle, DataError, Instrument, Ticker
 
 
 class OkxError(RuntimeError):
@@ -60,6 +61,19 @@ class OkxClient:
                 continue
             candles[candle.ts] = candle
         return [candles[ts] for ts in sorted(candles)]
+
+    def get_24h_volume(self, instrument_id: str) -> Decimal:
+        data = self._get("/api/v5/market/ticker", {"instId": instrument_id})
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                ticker = Ticker.from_okx(item)
+            except DataError:
+                continue
+            if ticker.instrument_id == instrument_id:
+                return ticker.volume_24h
+        raise OkxError(f"missing ticker volume for {instrument_id}")
 
     def _get(self, path: str, params: dict[str, str]) -> list[Any]:
         request = Request(

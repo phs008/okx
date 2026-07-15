@@ -13,4 +13,6 @@ build/
 .codex/**
 
 tests/**
+!tests/
+!tests/**/*.py
 nohup.out

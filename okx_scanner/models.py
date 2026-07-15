@@ -57,10 +57,24 @@ class Instrument:
 
 
 @dataclass(frozen=True, slots=True)
+class Ticker:
+    instrument_id: str
+    volume_24h: Decimal
+
+    @classmethod
+    def from_okx(cls, item: dict[str, Any]) -> "Ticker":
+        inst_id = item.get("instId")
+        if not isinstance(inst_id, str) or not inst_id:
+            raise DataError("invalid ticker object")
+        return cls(inst_id, _decimal(item.get("vol24h"), "vol24h"))
+
+
+@dataclass(frozen=True, slots=True)
 class RsiHit:
     instrument_id: str
     candle_ts: int
     rsi: float
+    volume_24h: Decimal
 
     @property
     def state(self) -> str:
@@ -71,5 +85,6 @@ class RsiHit:
             "instrumentId": self.instrument_id,
             "candleTs": self.candle_ts,
             "rsi": round(self.rsi, 4),
+            "volume24h": str(self.volume_24h),
             "state": self.state,
         }

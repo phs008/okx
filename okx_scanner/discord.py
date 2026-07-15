@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -53,7 +54,7 @@ def _payload(hits: list[RsiHit]) -> dict[str, object]:
     start = datetime.fromtimestamp(first_ts / 1000, tz=UTC)
     kst = timezone(timedelta(hours=9))
     lines = [
-        f"{hit.instrument_id}: RSI {hit.rsi:.2f} ({'30 이하' if hit.rsi <= 30 else '70 이상'})"
+        _hit_line(hit)
         for hit in sorted(hits, key=lambda item: (item.state, item.instrument_id))
     ]
     return {
@@ -72,3 +73,18 @@ def _payload(hits: list[RsiHit]) -> dict[str, object]:
             }
         ],
     }
+
+
+def _hit_line(hit: RsiHit) -> str:
+    threshold = "30 이하" if hit.rsi <= 30 else "70 이상"
+    return (
+        f"{hit.instrument_id}: RSI {hit.rsi:.2f} ({threshold}), "
+        f"24h volume {format_volume(hit.volume_24h)}"
+    )
+
+
+def format_volume(value: Decimal) -> str:
+    normalized = value.normalize()
+    if normalized == normalized.to_integral():
+        return f"{normalized:.0f}"
+    return f"{normalized:f}"
