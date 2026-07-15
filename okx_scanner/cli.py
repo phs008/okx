@@ -46,7 +46,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         timeout_seconds=settings.request_timeout_seconds,
         attempts=settings.request_attempts,
     )
-    market = CachedMarketClient(upstream_market, SqliteCandleStore(settings.db_path))
+    market = CachedMarketClient(
+        upstream_market,
+        SqliteCandleStore(settings.db_path),
+        backfill_limit=settings.candle_limit,
+    )
     notifier = (
         DiscordWebhook(settings.discord_webhook_url, timeout_seconds=settings.request_timeout_seconds)
         if settings.discord_webhook_url

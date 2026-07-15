@@ -19,9 +19,10 @@ class UpstreamMarket(Protocol):
 
 
 class CachedMarketClient:
-    def __init__(self, upstream: UpstreamMarket, store: SqliteCandleStore) -> None:
+    def __init__(self, upstream: UpstreamMarket, store: SqliteCandleStore, *, backfill_limit: int) -> None:
         self.upstream = upstream
         self.store = store
+        self.backfill_limit = backfill_limit
 
     def get_perp_instruments(self, quote_currency: str) -> list[Instrument]:
         return self.upstream.get_perp_instruments(quote_currency)
@@ -39,7 +40,11 @@ class CachedMarketClient:
             self.store.upsert_candles(
                 instrument_id,
                 bar,
-                [candle for candle in self.upstream.get_candles(instrument_id, bar, limit) if candle.confirmed],
+                [
+                    candle
+                    for candle in self.upstream.get_candles(instrument_id, bar, self.backfill_limit)
+                    if candle.confirmed
+                ],
             )
         elif latest_remote.ts > latest_local_ts:
             self._sync_missing_candles(instrument_id, bar, latest_local_ts, latest_remote.ts)

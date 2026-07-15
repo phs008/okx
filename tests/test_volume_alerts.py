@@ -61,7 +61,7 @@ class VolumeAlertTests(unittest.TestCase):
     def test_scan_includes_24h_volume_in_hit_and_notifier(self) -> None:
         notifier = RecordingNotifier()
         service = ScannerService(
-            Settings(candle_limit=101, vwma_period=100),
+            Settings(candle_limit=101, vwma_period=100, indicator_lookback=101),
             FakeMarket(),
             notifier,
         )
@@ -76,7 +76,7 @@ class VolumeAlertTests(unittest.TestCase):
 
     def test_scan_includes_oversold_hit_only_when_close_is_below_vwma(self) -> None:
         service = ScannerService(
-            Settings(candle_limit=101, vwma_period=100),
+            Settings(candle_limit=101, vwma_period=100, indicator_lookback=101),
             OversoldBelowVwmaMarket(),
             RecordingNotifier(),
         )
@@ -86,6 +86,20 @@ class VolumeAlertTests(unittest.TestCase):
         self.assertEqual(1, len(summary.hits))
         self.assertLessEqual(summary.hits[0].rsi, 30)
         self.assertLess(summary.hits[0].close, summary.hits[0].vwma_100)
+
+    def test_scan_skips_already_processed_latest_candle(self) -> None:
+        notifier = RecordingNotifier()
+        service = ScannerService(
+            Settings(candle_limit=101, vwma_period=100, indicator_lookback=101),
+            FakeMarket(),
+            notifier,
+        )
+
+        first = service.scan_once()
+        second = service.scan_once()
+
+        self.assertEqual(1, len(first.hits))
+        self.assertEqual(0, len(second.hits))
 
     def test_discord_payload_renders_24h_volume(self) -> None:
         hit = RsiHit(

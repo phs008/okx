@@ -54,6 +54,7 @@ class ScannerService:
         self.market = market
         self.notifier = notifier
         self._logger = logger
+        self._processed_candle_ts: dict[str, int] = {}
 
     def scan_once(self, *, dry_run: bool = False) -> ScanSummary:
         started_at = datetime.now(UTC)
@@ -114,13 +115,15 @@ class ScannerService:
         candles = self.market.get_candles(
             instrument_id,
             self.settings.bar,
-            self.settings.candle_limit,
+            self.settings.indicator_lookback,
         )
         completed = [candle for candle in candles if candle.confirmed]
         minimum_candles = max(self.settings.rsi_period + 1, self.settings.vwma_period + 1)
         if len(completed) < minimum_candles:
             return None
         latest = completed[-1]
+        if self._processed_candle_ts.get(instrument_id) == latest.ts:
+            return None
         rsi = wilder_rsi([candle.close for candle in completed], self.settings.rsi_period)
         closes = [candle.close for candle in completed]
         volumes = [candle.volume for candle in completed]
@@ -130,6 +133,7 @@ class ScannerService:
         is_overbought_above_vwma = rsi >= self.settings.rsi_overbought and latest.close > latest_vwma
         if is_oversold_below_vwma or is_overbought_above_vwma:
             volume_24h = self.market.get_24h_volume(instrument_id)
+            self._processed_candle_ts[instrument_id] = latest.ts
             return RsiHit(
                 instrument_id=instrument_id,
                 candle_ts=latest.ts,
@@ -139,6 +143,7 @@ class ScannerService:
                 vwma_100=latest_vwma,
                 vwma_signal=_vwma_signal(completed[-2].close, previous_vwma, latest.close, latest_vwma),
             )
+        self._processed_candle_ts[instrument_id] = latest.ts
         return None
 
     def _log(self, message: str) -> None:

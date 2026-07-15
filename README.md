@@ -37,7 +37,7 @@ python3 -m okx_scanner scan-once
 - RSI가 `30 이하`이고 종가가 VWMA 100 아래
 - 또는 RSI가 `70 이상`이고 종가가 VWMA 100 위
 
-캔들 데이터는 SQLite에 저장합니다. DB가 비어 있으면 종목별 기본 `2400`개 캔들을 먼저 저장하고, 이후에는 최신 완료봉만 추가합니다. DB의 마지막 봉과 최신 완료봉 사이에 누락이 있으면 그 사이 봉을 모두 가져와 저장합니다.
+캔들 데이터는 SQLite에 저장합니다. DB가 비어 있으면 종목별 기본 `2400`개 캔들을 먼저 저장하고, 이후에는 최신 완료봉만 추가합니다. DB의 마지막 봉과 최신 완료봉 사이에 누락이 있으면 그 사이 봉을 모두 가져와 저장합니다. 스캔 계산은 매번 전체 `2400`개를 읽지 않고 `INDICATOR_LOOKBACK` 개수만 읽습니다.
 
 ## 백그라운드 실행
 
@@ -73,6 +73,7 @@ tail -f okx_scanner.log
 | `RSI_OVERBOUGHT` | `70` | 이 값 이상이면 알림 |
 | `CANDLE_LIMIT` | `2400` | 종목당 조회할 캔들 수 |
 | `VWMA_PERIOD` | `100` | VWMA 계산 기간 |
+| `INDICATOR_LOOKBACK` | `300` | 매 스캔 계산에 사용할 최근 캔들 수 |
 | `DB_PATH` | `okx_scanner.sqlite3` | SQLite DB 파일 경로 |
 | `SCAN_INTERVAL_SECONDS` | `900` | daemon 반복 주기 |
 | `REQUEST_TIMEOUT_SECONDS` | `10` | HTTP timeout |
