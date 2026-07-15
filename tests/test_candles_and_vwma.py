@@ -91,6 +91,33 @@ class CandleAndVwmaTests(unittest.TestCase):
         self.assertEqual(350, len(candles))
         self.assertTrue(any(urlparse(url).path.endswith("/history-candles") for url in requested_urls))
 
+    def test_get_24h_volumes_uses_bulk_tickers_endpoint(self) -> None:
+        requested_urls: list[str] = []
+
+        def opener(request, timeout: float) -> FakeResponse:
+            requested_urls.append(request.full_url)
+            return FakeResponse(
+                {
+                    "code": "0",
+                    "data": [
+                        {"instId": "BTC-USDT-SWAP", "vol24h": "12345.678"},
+                        {"instId": "ETH-USDT-SWAP", "vol24h": "98765"},
+                        {"instId": "BTC-USDC-SWAP", "vol24h": "1"},
+                    ],
+                }
+            )
+
+        client = OkxClient("https://example.test", timeout_seconds=1, attempts=1, opener=opener)
+
+        volumes = client.get_24h_volumes("USDT")
+
+        self.assertEqual(
+            {"BTC-USDT-SWAP": Decimal("12345.678"), "ETH-USDT-SWAP": Decimal("98765")},
+            volumes,
+        )
+        self.assertEqual("/api/v5/market/tickers", urlparse(requested_urls[0]).path)
+        self.assertEqual("SWAP", parse_qs(urlparse(requested_urls[0]).query)["instType"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

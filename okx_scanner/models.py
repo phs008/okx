@@ -92,6 +92,7 @@ class RsiHit:
     rsi: float
     volume_24h: Decimal
     close: Decimal
+    change_percent: Decimal
     vwma_100: Decimal
     vwma_signal: str
 
@@ -106,6 +107,7 @@ class RsiHit:
             "rsi": round(self.rsi, 4),
             "volume24h": str(self.volume_24h),
             "close": str(self.close),
+            "changePercent": str(self.change_percent),
             "vwma100": str(self.vwma_100),
             "vwmaSignal": self.vwma_signal,
             "state": self.state,

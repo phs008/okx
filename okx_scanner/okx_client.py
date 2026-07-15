@@ -119,6 +119,21 @@ class OkxClient:
                 return ticker.volume_24h
         raise OkxError(f"missing ticker volume for {instrument_id}")
 
+    def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]:
+        data = self._get("/api/v5/market/tickers", {"instType": "SWAP"})
+        suffix = f"-{quote_currency}-SWAP"
+        volumes: dict[str, Decimal] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                ticker = Ticker.from_okx(item)
+            except DataError:
+                continue
+            if ticker.instrument_id.endswith(suffix):
+                volumes[ticker.instrument_id] = ticker.volume_24h
+        return volumes
+
     def _get(self, path: str, params: dict[str, str]) -> list[Any]:
         request = Request(
             f"{self.base_url}{path}?{urlencode(params)}",

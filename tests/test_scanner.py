@@ -15,7 +15,15 @@ from okx_scanner.service import ScannerService
 
 def candles_for_rsi(values: list[int], *, start_ts: int = 1_700_000_000_000) -> list[Candle]:
     return [
-        Candle(ts=start_ts + index * 900_000, close=Decimal(value), confirmed=True)
+        Candle(
+            ts=start_ts + index * 900_000,
+            open=Decimal(value),
+            high=Decimal(value),
+            low=Decimal(value),
+            close=Decimal(value),
+            volume=Decimal(1),
+            confirmed=True,
+        )
         for index, value in enumerate(values)
     ]
 
@@ -36,6 +44,16 @@ class FakeMarket:
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]:
         return self.candles[instrument_id]
 
+    def get_24h_volume(self, instrument_id: str) -> Decimal:
+        return Decimal("1000")
+
+    def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]:
+        return {
+            "DOWN-USDT-SWAP": Decimal("1000"),
+            "MID-USDT-SWAP": Decimal("1000"),
+            "UP-USDT-SWAP": Decimal("1000"),
+        }
+
 
 class FakeNotifier:
     def __init__(self) -> None:
@@ -47,12 +65,12 @@ class FakeNotifier:
 
 class ScannerTests(unittest.TestCase):
     def test_scan_filters_only_rsi_extremes(self) -> None:
-        settings = Settings()
+        settings = Settings(candle_limit=101, indicator_lookback=101)
         market = FakeMarket(
             {
-                "DOWN-USDT-SWAP": candles_for_rsi([100, *range(99, 84, -1)]),
-                "MID-USDT-SWAP": candles_for_rsi([100, 101, 100, 101, 100, 101, 100, 101, 100, 101, 100, 101, 100, 101, 100]),
-                "UP-USDT-SWAP": candles_for_rsi([100, *range(101, 116)]),
+                "DOWN-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
+                "MID-USDT-SWAP": candles_for_rsi([100] * 101),
+                "UP-USDT-SWAP": candles_for_rsi([100] * 100 + [200]),
             }
         )
         notifier = FakeNotifier()
@@ -63,16 +81,18 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual([hit.instrument_id for hit in summary.hits], ["DOWN-USDT-SWAP", "UP-USDT-SWAP"])
         self.assertEqual(notifier.sent, [["DOWN-USDT-SWAP", "UP-USDT-SWAP"]])
         self.assertEqual(market.instrument_requests, [("USDT",)])
-        self.assertIn("discord send started hit_count=2", logs)
-        self.assertIn("discord send completed hit_count=2", logs)
+        self.assertIn("candle sync progress 1/3 instrument=DOWN-USDT-SWAP", logs)
+        self.assertIn("candle sync progress 3/3 instrument=UP-USDT-SWAP", logs)
+        self.assertNotIn("discord send started hit_count=2", logs)
+        self.assertNotIn("discord send completed hit_count=2", logs)
 
     def test_dry_run_does_not_send_discord(self) -> None:
-        settings = Settings()
+        settings = Settings(candle_limit=101, indicator_lookback=101)
         market = FakeMarket(
             {
-                "DOWN-USDT-SWAP": candles_for_rsi([100, *range(99, 84, -1)]),
-                "MID-USDT-SWAP": candles_for_rsi([100, *range(99, 84, -1)]),
-                "UP-USDT-SWAP": candles_for_rsi([100, *range(99, 84, -1)]),
+                "DOWN-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
+                "MID-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
+                "UP-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
             }
         )
         notifier = FakeNotifier()

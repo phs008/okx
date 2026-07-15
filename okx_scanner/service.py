@@ -15,7 +15,7 @@ from .models import Candle, Instrument, RsiHit
 class MarketClient(Protocol):
     def get_perp_instruments(self, quote_currency: str) -> list[Instrument]: ...
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]: ...
-    def get_24h_volume(self, instrument_id: str) -> Decimal: ...
+    def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]: ...
 
 
 class Notifier(Protocol):
@@ -62,13 +62,17 @@ class ScannerService:
         self._log(f"scan started dry_run={dry_run}")
         instruments = self.market.get_perp_instruments(self.settings.quote_currency)
         self._log(f"loaded {len(instruments)} perp instruments quote={self.settings.quote_currency}")
+        volume_24h_by_instrument = self.market.get_24h_volumes(self.settings.quote_currency)
+        self._log(f"loaded {len(volume_24h_by_instrument)} ticker 24h volumes quote={self.settings.quote_currency}")
         hits: list[RsiHit] = []
         scanned = 0
         errors = 0
 
-        for instrument in instruments:
+        total = len(instruments)
+        for index, instrument in enumerate(instruments, start=1):
             try:
-                hit = self._scan_instrument(instrument.instrument_id)
+                self._log(f"candle sync progress {index}/{total} instrument={instrument.instrument_id}")
+                hit = self._scan_instrument(instrument.instrument_id, volume_24h_by_instrument)
             except Exception:
                 errors += 1
                 continue
@@ -79,13 +83,11 @@ class ScannerService:
         if hits and not dry_run:
             if self.notifier is None:
                 raise RuntimeError("Discord notifier is not configured")
-            self._log(f"discord send started hit_count={len(hits)}")
             try:
                 self.notifier.send_hits(hits)
             except Exception as exc:
                 self._log(f"discord send failed error={type(exc).__name__}")
                 raise
-            self._log(f"discord send completed hit_count={len(hits)}")
         elif hits:
             self._log(f"dry-run skipped discord hit_count={len(hits)}")
         else:
@@ -111,7 +113,7 @@ class ScannerService:
             self._log(f"sleeping seconds={self.settings.scan_interval_seconds}")
             time.sleep(self.settings.scan_interval_seconds)
 
-    def _scan_instrument(self, instrument_id: str) -> RsiHit | None:
+    def _scan_instrument(self, instrument_id: str, volume_24h_by_instrument: dict[str, Decimal]) -> RsiHit | None:
         candles = self.market.get_candles(
             instrument_id,
             self.settings.bar,
@@ -132,7 +134,10 @@ class ScannerService:
         is_oversold_below_vwma = rsi <= self.settings.rsi_oversold and latest.close < latest_vwma
         is_overbought_above_vwma = rsi >= self.settings.rsi_overbought and latest.close > latest_vwma
         if is_oversold_below_vwma or is_overbought_above_vwma:
-            volume_24h = self.market.get_24h_volume(instrument_id)
+            try:
+                volume_24h = volume_24h_by_instrument[instrument_id]
+            except KeyError as exc:
+                raise RuntimeError(f"missing 24h volume for {instrument_id}") from exc
             self._processed_candle_ts[instrument_id] = latest.ts
             return RsiHit(
                 instrument_id=instrument_id,
@@ -140,6 +145,7 @@ class ScannerService:
                 rsi=rsi,
                 volume_24h=volume_24h,
                 close=latest.close,
+                change_percent=_price_change_percent(completed[-2].close, latest.close),
                 vwma_100=latest_vwma,
                 vwma_signal=_vwma_signal(completed[-2].close, previous_vwma, latest.close, latest_vwma),
             )
@@ -157,3 +163,9 @@ def _vwma_signal(previous_close: Decimal, previous_vwma: Decimal, latest_close: 
     if previous_close >= previous_vwma and latest_close < latest_vwma:
         return "CROSS_BELOW"
     return "ABOVE" if latest_close > latest_vwma else "BELOW" if latest_close < latest_vwma else "TOUCH"
+
+
+def _price_change_percent(previous_close: Decimal, latest_close: Decimal) -> Decimal:
+    if previous_close == 0:
+        return Decimal(0)
+    return (latest_close - previous_close) / previous_close * Decimal(100)

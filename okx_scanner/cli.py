@@ -11,7 +11,7 @@ from .cached_market import CachedMarketClient
 from .config import ConfigError, Settings
 from .discord import DiscordWebhook
 from .okx_client import OkxClient
-from .service import ScannerService
+from .service import ScanSummary, ScannerService
 from .sqlite_store import SqliteCandleStore
 
 
@@ -59,14 +59,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     service = ScannerService(settings, market, notifier, logger=_log)
 
     if args.command == "scan-once":
-        _print(service.scan_once(dry_run=dry_run).as_dict())
+        _print_scan_result(service.scan_once(dry_run=dry_run), dry_run=dry_run)
         return 0
     if args.command == "daemon":
         try:
-            service.run_forever(dry_run=dry_run, output=lambda summary: _print(summary.as_dict()))
+            service.run_forever(dry_run=dry_run, output=lambda summary: _print_scan_result(summary, dry_run=dry_run))
         except KeyboardInterrupt:
             return 130
     return 2
+
+
+def _print_scan_result(summary: ScanSummary, *, dry_run: bool, stream=None) -> None:
+    if summary.hits and not dry_run:
+        print("Send discord condition message complete", file=stream or sys.stdout, flush=True)
+        return
+    _print(summary.as_dict(), stream=stream)
 
 
 def _print(value: object, *, stream=None) -> None:
