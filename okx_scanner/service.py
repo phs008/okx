@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from .config import Settings
-from .indicators import vwma, wilder_rsi
+from .indicators import vwma, weighted_moving_average, wilder_rsi_series
 from .models import Candle, Instrument, RsiHit
 
 
@@ -16,6 +16,7 @@ class MarketClient(Protocol):
     def get_perp_instruments(self, quote_currency: str) -> list[Instrument]: ...
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]: ...
     def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]: ...
+    def get_24h_turnovers(self, quote_currency: str) -> dict[str, Decimal]: ...
 
 
 class Notifier(Protocol):
@@ -64,6 +65,8 @@ class ScannerService:
         self._log(f"loaded {len(instruments)} perp instruments quote={self.settings.quote_currency}")
         volume_24h_by_instrument = self.market.get_24h_volumes(self.settings.quote_currency)
         self._log(f"loaded {len(volume_24h_by_instrument)} ticker 24h volumes quote={self.settings.quote_currency}")
+        turnover_24h_by_instrument = self.market.get_24h_turnovers(self.settings.quote_currency)
+        self._log(f"loaded {len(turnover_24h_by_instrument)} ticker 24h turnovers quote={self.settings.quote_currency}")
         hits: list[RsiHit] = []
         scanned = 0
         errors = 0
@@ -72,7 +75,7 @@ class ScannerService:
         for index, instrument in enumerate(instruments, start=1):
             try:
                 self._log(f"candle sync progress {index}/{total} instrument={instrument.instrument_id}")
-                hit = self._scan_instrument(instrument.instrument_id, volume_24h_by_instrument)
+                hit = self._scan_instrument(instrument, volume_24h_by_instrument, turnover_24h_by_instrument)
             except Exception:
                 errors += 1
                 continue
@@ -113,41 +116,57 @@ class ScannerService:
             self._log(f"sleeping seconds={self.settings.scan_interval_seconds}")
             time.sleep(self.settings.scan_interval_seconds)
 
-    def _scan_instrument(self, instrument_id: str, volume_24h_by_instrument: dict[str, Decimal]) -> RsiHit | None:
+    def _scan_instrument(
+        self,
+        instrument: Instrument,
+        volume_24h_by_instrument: dict[str, Decimal],
+        turnover_24h_by_instrument: dict[str, Decimal],
+    ) -> RsiHit | None:
+        instrument_id = instrument.instrument_id
         candles = self.market.get_candles(
             instrument_id,
             self.settings.bar,
             self.settings.indicator_lookback,
         )
         completed = [candle for candle in candles if candle.confirmed]
-        minimum_candles = max(self.settings.rsi_period + 1, self.settings.vwma_period + 1)
+        minimum_candles = max(
+            self.settings.rsi_period + self.settings.rsi_wma_period + 1,
+            self.settings.vwma_period + 1,
+        )
         if len(completed) < minimum_candles:
             return None
         latest = completed[-1]
         if self._processed_candle_ts.get(instrument_id) == latest.ts:
             return None
-        rsi = wilder_rsi([candle.close for candle in completed], self.settings.rsi_period)
         closes = [candle.close for candle in completed]
         volumes = [candle.volume for candle in completed]
+        rsi_values = wilder_rsi_series(closes, self.settings.rsi_period)
+        rsi = rsi_values[-1]
+        latest_rsi_wma = weighted_moving_average(rsi_values, self.settings.rsi_wma_period)
+        previous_rsi_wma = weighted_moving_average(rsi_values[:-1], self.settings.rsi_wma_period)
+        rsi_signal = _rsi_wma_signal(rsi_values[-2], previous_rsi_wma, rsi, latest_rsi_wma)
         latest_vwma = vwma(closes, volumes, self.settings.vwma_period)
         previous_vwma = vwma(closes[:-1], volumes[:-1], self.settings.vwma_period)
-        is_oversold_below_vwma = rsi <= self.settings.rsi_oversold and latest.close < latest_vwma
-        is_overbought_above_vwma = rsi >= self.settings.rsi_overbought and latest.close > latest_vwma
-        if is_oversold_below_vwma or is_overbought_above_vwma:
+        vwma_signal = _vwma_signal(completed[-2].close, previous_vwma, latest.close, latest_vwma)
+        if rsi_signal == vwma_signal and vwma_signal in {"CROSS_ABOVE", "CROSS_BELOW"}:
             try:
                 volume_24h = volume_24h_by_instrument[instrument_id]
+                turnover_24h = turnover_24h_by_instrument[instrument_id]
             except KeyError as exc:
-                raise RuntimeError(f"missing 24h volume for {instrument_id}") from exc
+                raise RuntimeError(f"missing 24h ticker value for {instrument_id}") from exc
             self._processed_candle_ts[instrument_id] = latest.ts
             return RsiHit(
                 instrument_id=instrument_id,
                 candle_ts=latest.ts,
                 rsi=rsi,
+                rsi_wma=latest_rsi_wma,
                 volume_24h=volume_24h,
+                turnover_24h=turnover_24h,
+                signal_volume=latest.volume * instrument.contract_value,
                 close=latest.close,
                 change_percent=_price_change_percent(completed[-2].close, latest.close),
                 vwma_100=latest_vwma,
-                vwma_signal=_vwma_signal(completed[-2].close, previous_vwma, latest.close, latest_vwma),
+                vwma_signal=vwma_signal,
             )
         self._processed_candle_ts[instrument_id] = latest.ts
         return None
@@ -163,6 +182,14 @@ def _vwma_signal(previous_close: Decimal, previous_vwma: Decimal, latest_close: 
     if previous_close >= previous_vwma and latest_close < latest_vwma:
         return "CROSS_BELOW"
     return "ABOVE" if latest_close > latest_vwma else "BELOW" if latest_close < latest_vwma else "TOUCH"
+
+
+def _rsi_wma_signal(previous_rsi: float, previous_wma: float, latest_rsi: float, latest_wma: float) -> str:
+    if previous_rsi <= previous_wma and latest_rsi > latest_wma:
+        return "CROSS_ABOVE"
+    if previous_rsi >= previous_wma and latest_rsi < latest_wma:
+        return "CROSS_BELOW"
+    return "ABOVE" if latest_rsi > latest_wma else "BELOW" if latest_rsi < latest_wma else "TOUCH"
 
 
 def _price_change_percent(previous_close: Decimal, latest_close: Decimal) -> Decimal:

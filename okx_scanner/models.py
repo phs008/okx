@@ -61,6 +61,7 @@ class Instrument:
     instrument_id: str
     quote_currency: str
     state: str
+    contract_value: Decimal = Decimal("1")
 
     @classmethod
     def from_okx(cls, item: dict[str, Any]) -> "Instrument":
@@ -69,20 +70,34 @@ class Instrument:
         quote_currency = item.get("quoteCcy") or item.get("settleCcy")
         if not all(isinstance(value, str) and value for value in (inst_id, state, quote_currency)):
             raise DataError("invalid instrument object")
-        return cls(inst_id, quote_currency, state)
+        contract_value = _decimal(item.get("ctVal") or "1", "ctVal")
+        if contract_value <= 0:
+            raise DataError("invalid instrument contract value")
+        return cls(inst_id, quote_currency, state, contract_value)
 
 
 @dataclass(frozen=True, slots=True)
 class Ticker:
     instrument_id: str
     volume_24h: Decimal
+    turnover_24h: Decimal
 
     @classmethod
     def from_okx(cls, item: dict[str, Any]) -> "Ticker":
         inst_id = item.get("instId")
         if not isinstance(inst_id, str) or not inst_id:
             raise DataError("invalid ticker object")
-        return cls(inst_id, _decimal(item.get("vol24h"), "vol24h"))
+        volume_24h = _decimal(item.get("volCcy24h"), "volCcy24h")
+        turnover = _turnover_24h(item, volume_24h)
+        return cls(inst_id, volume_24h, turnover)
+
+
+def _turnover_24h(item: dict[str, Any], volume_24h: Decimal) -> Decimal:
+    for field in ("volCcyQuote24h", "turnover24h"):
+        value = item.get(field)
+        if value is not None:
+            return _decimal(value, field)
+    return volume_24h * _decimal(item.get("last"), "last")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +105,10 @@ class RsiHit:
     instrument_id: str
     candle_ts: int
     rsi: float
+    rsi_wma: float
     volume_24h: Decimal
+    turnover_24h: Decimal
+    signal_volume: Decimal
     close: Decimal
     change_percent: Decimal
     vwma_100: Decimal
@@ -98,14 +116,17 @@ class RsiHit:
 
     @property
     def state(self) -> str:
-        return "OVERSOLD" if self.rsi <= 30 else "OVERBOUGHT"
+        return "BULLISH" if self.vwma_signal == "CROSS_ABOVE" else "BEARISH"
 
     def as_dict(self) -> dict[str, object]:
         return {
             "instrumentId": self.instrument_id,
             "candleTs": self.candle_ts,
             "rsi": round(self.rsi, 4),
+            "rsiWma": round(self.rsi_wma, 4),
             "volume24h": str(self.volume_24h),
+            "turnover24h": str(self.turnover_24h),
+            "signalVolume": str(self.signal_volume),
             "close": str(self.close),
             "changePercent": str(self.change_percent),
             "vwma100": str(self.vwma_100),

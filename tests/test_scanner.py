@@ -13,7 +13,12 @@ from okx_scanner.models import Candle, Instrument
 from okx_scanner.service import ScannerService
 
 
-def candles_for_rsi(values: list[int], *, start_ts: int = 1_700_000_000_000) -> list[Candle]:
+def candles_for_rsi(
+    values: list[int],
+    *,
+    start_ts: int = 1_700_000_000_000,
+    latest_volume: str = "130",
+) -> list[Candle]:
     return [
         Candle(
             ts=start_ts + index * 900_000,
@@ -21,7 +26,7 @@ def candles_for_rsi(values: list[int], *, start_ts: int = 1_700_000_000_000) -> 
             high=Decimal(value),
             low=Decimal(value),
             close=Decimal(value),
-            volume=Decimal(1),
+            volume=Decimal(latest_volume if index == len(values) - 1 else "100"),
             confirmed=True,
         )
         for index, value in enumerate(values)
@@ -54,6 +59,13 @@ class FakeMarket:
             "UP-USDT-SWAP": Decimal("1000"),
         }
 
+    def get_24h_turnovers(self, quote_currency: str) -> dict[str, Decimal]:
+        return {
+            "DOWN-USDT-SWAP": Decimal("10000000"),
+            "MID-USDT-SWAP": Decimal("10000000"),
+            "UP-USDT-SWAP": Decimal("10000000"),
+        }
+
 
 class FakeNotifier:
     def __init__(self) -> None:
@@ -65,12 +77,12 @@ class FakeNotifier:
 
 class ScannerTests(unittest.TestCase):
     def test_scan_filters_only_rsi_extremes(self) -> None:
-        settings = Settings(candle_limit=101, indicator_lookback=101)
+        settings = Settings()
         market = FakeMarket(
             {
-                "DOWN-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
-                "MID-USDT-SWAP": candles_for_rsi([100] * 101),
-                "UP-USDT-SWAP": candles_for_rsi([100] * 100 + [200]),
+                "DOWN-USDT-SWAP": candles_for_rsi([100] * 1344 + [1]),
+                "MID-USDT-SWAP": candles_for_rsi([100] * 1345),
+                "UP-USDT-SWAP": candles_for_rsi([100] * 1344 + [200]),
             }
         )
         notifier = FakeNotifier()
@@ -87,12 +99,12 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("discord send completed hit_count=2", logs)
 
     def test_dry_run_does_not_send_discord(self) -> None:
-        settings = Settings(candle_limit=101, indicator_lookback=101)
+        settings = Settings()
         market = FakeMarket(
             {
-                "DOWN-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
-                "MID-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
-                "UP-USDT-SWAP": candles_for_rsi([100] * 100 + [1]),
+                "DOWN-USDT-SWAP": candles_for_rsi([100] * 1344 + [1]),
+                "MID-USDT-SWAP": candles_for_rsi([100] * 1344 + [1]),
+                "UP-USDT-SWAP": candles_for_rsi([100] * 1344 + [1]),
             }
         )
         notifier = FakeNotifier()
@@ -105,26 +117,58 @@ class ScannerTests(unittest.TestCase):
     def test_bar_is_fixed_to_15m(self) -> None:
         settings = replace(Settings(), bar="5m")
         with self.assertRaises(ConfigError):
-            settings.validate(require_webhook=False)
+            settings.validate()
 
     def test_settings_load_discord_webhook_from_dotenv(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, ".env").write_text(
-                "DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/1/token'\n",
+                "DISCORD_WEBHOOK_RSIVWMA='https://discord.com/api/webhooks/1/token'\n",
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {}, clear=True):
                 current = os.getcwd()
                 os.chdir(directory)
                 try:
-                    settings = Settings.from_env(require_webhook=True)
+                    settings = Settings.from_env(require_rsi_vwma_webhook=True)
                 finally:
                     os.chdir(current)
 
         self.assertEqual(
-            settings.discord_webhook_url,
+            settings.discord_webhook_rsi_vwma_url,
             "https://discord.com/api/webhooks/1/token",
         )
+
+    def test_settings_loads_separate_db_paths_from_dotenv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, ".env").write_text(
+                "DB_PATH_RSIVWMA=okx_rsi.sqlite3\n"
+                "DB_PATH_SIGNAL=okx_signal.sqlite3\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                current = os.getcwd()
+                os.chdir(directory)
+                try:
+                    settings = Settings.from_env()
+                finally:
+                    os.chdir(current)
+
+        self.assertEqual("okx_rsi.sqlite3", settings.db_path)
+        self.assertEqual("okx_signal.sqlite3", settings.signal_db_path)
+
+    def test_legacy_db_path_is_still_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, ".env").write_text("DB_PATH=legacy.sqlite3\n", encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                current = os.getcwd()
+                os.chdir(directory)
+                try:
+                    settings = Settings.from_env()
+                finally:
+                    os.chdir(current)
+
+        self.assertEqual("legacy.sqlite3", settings.db_path)
+        self.assertEqual("legacy.sqlite3", settings.signal_db_path)
 
     def test_exported_environment_overrides_dotenv(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -133,11 +177,18 @@ class ScannerTests(unittest.TestCase):
                 current = os.getcwd()
                 os.chdir(directory)
                 try:
-                    settings = Settings.from_env(require_webhook=False)
+                    settings = Settings.from_env()
                 finally:
                     os.chdir(current)
 
         self.assertEqual(settings.rsi_oversold, 25.0)
+
+    def test_power_indicator_lookback_defaults_to_14_days_plus_latest_candle(self) -> None:
+        self.assertEqual(1345, Settings().power_indicator_lookback)
+
+    def test_power_indicator_lookback_must_cover_14_day_volume_sma(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "POWER_INDICATOR_LOOKBACK"):
+            replace(Settings(), power_indicator_lookback=1344).validate()
 
 
 if __name__ == "__main__":

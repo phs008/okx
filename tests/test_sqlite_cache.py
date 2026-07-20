@@ -41,6 +41,9 @@ class FakeUpstream:
     def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]:
         return {"BTC-USDT-SWAP": Decimal("10")}
 
+    def get_24h_turnovers(self, quote_currency: str) -> dict[str, Decimal]:
+        return {"BTC-USDT-SWAP": Decimal("10000000")}
+
 
 class SqliteCacheTests(unittest.TestCase):
     def test_backfills_when_sqlite_file_has_no_candles(self) -> None:

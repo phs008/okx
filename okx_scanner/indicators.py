@@ -4,7 +4,15 @@ from decimal import Decimal
 from typing import Sequence
 
 
+VOLUME_SMA_PERIOD_14D_15M = 14 * 24 * 4
+VOLUME_SURGE_MULTIPLIER = Decimal("1.3")
+
+
 def wilder_rsi(closes: Sequence[Decimal], period: int = 14) -> float:
+    return wilder_rsi_series(closes, period)[-1]
+
+
+def wilder_rsi_series(closes: Sequence[Decimal], period: int = 14) -> list[float]:
     if period <= 0:
         raise ValueError("RSI period must be positive")
     if len(closes) < period + 1:
@@ -17,11 +25,29 @@ def wilder_rsi(closes: Sequence[Decimal], period: int = 14) -> float:
 
     average_gain = sum(gains[:period], Decimal(0)) / divisor
     average_loss = sum(losses[:period], Decimal(0)) / divisor
+    values = [_rsi_from_averages(average_gain, average_loss)]
 
     for index in range(period, len(changes)):
         average_gain = (average_gain * (period - 1) + gains[index]) / divisor
         average_loss = (average_loss * (period - 1) + losses[index]) / divisor
+        values.append(_rsi_from_averages(average_gain, average_loss))
 
+    return values
+
+
+def weighted_moving_average(values: Sequence[float], period: int) -> float:
+    if period <= 0:
+        raise ValueError("WMA period must be positive")
+    if len(values) < period:
+        raise ValueError(f"WMA({period}) needs at least {period} values")
+
+    recent_values = values[-period:]
+    weights = range(1, period + 1)
+    weighted_sum = sum(value * weight for value, weight in zip(recent_values, weights, strict=True))
+    return weighted_sum / sum(weights)
+
+
+def _rsi_from_averages(average_gain: Decimal, average_loss: Decimal) -> float:
     if average_loss == 0:
         return 100.0 if average_gain > 0 else 50.0
     if average_gain == 0:
@@ -47,3 +73,21 @@ def vwma(closes: Sequence[Decimal], volumes: Sequence[Decimal], period: int) -> 
         close * volume for close, volume in zip(recent_closes, recent_volumes, strict=True)
     )
     return weighted_price_sum / volume_sum
+
+
+def latest_volume_is_above_sma(
+    volumes: Sequence[Decimal],
+    *,
+    period: int = VOLUME_SMA_PERIOD_14D_15M,
+    multiplier: Decimal = VOLUME_SURGE_MULTIPLIER,
+) -> bool:
+    if period <= 0:
+        raise ValueError("Volume SMA period must be positive")
+    if len(volumes) < period + 1:
+        raise ValueError(f"Volume SMA({period}) needs at least {period + 1} candles")
+
+    previous_volumes = volumes[-period - 1 : -1]
+    average_volume = sum(previous_volumes, Decimal(0)) / Decimal(period)
+    if average_volume <= 0:
+        return False
+    return volumes[-1] >= average_volume * multiplier

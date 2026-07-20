@@ -7,12 +7,11 @@ __pycache__/
 .venv/
 dist/
 build/
-.env
 .state/
 .omx/
-.codex/**
-
 tests/**
 !tests/
 !tests/**/*.py
 nohup.out
+.codex/**
+tests/

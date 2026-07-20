@@ -19,6 +19,7 @@ class UpstreamMarket(Protocol):
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]: ...
     def get_24h_volume(self, instrument_id: str) -> Decimal: ...
     def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]: ...
+    def get_24h_turnovers(self, quote_currency: str) -> dict[str, Decimal]: ...
 
 
 class CachedMarketClient:
@@ -43,6 +44,9 @@ class CachedMarketClient:
 
     def get_24h_volumes(self, quote_currency: str) -> dict[str, Decimal]:
         return self.upstream.get_24h_volumes(quote_currency)
+
+    def get_24h_turnovers(self, quote_currency: str) -> dict[str, Decimal]:
+        return self.upstream.get_24h_turnovers(quote_currency)
 
     def get_candles(self, instrument_id: str, bar: str, limit: int) -> list[Candle]:
         expected_latest_ts = self._expected_latest_completed_ts(bar)
